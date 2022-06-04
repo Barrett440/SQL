@@ -1,0 +1,89 @@
+--Weekly update
+
+select *
+from (
+SELECT 
+    shop_city_name 城市,
+    shop_bd_name 商户BD,
+    shop_id 商户ID,
+    shop_name 商户名,
+    COUNT(DISTINCT order_sn) 过去四周订单量,
+    COUNT(DISTINCT CASE WHEN DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) >= 1 AND 
+                            DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) < 8 THEN order_sn END) "过去1-7天",
+    COUNT(DISTINCT CASE WHEN DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) >= 8 AND 
+                            DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) < 15 THEN order_sn END) "过去8-14天",
+    COUNT(DISTINCT CASE WHEN DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) >= 15 AND 
+                            DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) < 22 THEN order_sn END) "过去15-21天",
+    COUNT(DISTINCT CASE WHEN DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) >= 22 AND 
+                            DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) < 29 THEN order_sn END) "过去22-28天"
+FROM hungry_panda_usa.dwi_hp_order 
+WHERE DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) >= 1 AND DATEDIFF(DATE(NOW())-1, from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone)) < 29
+    AND pay_timemillis>0
+    AND shop_is_del = FALSE    -- 删除店铺
+    AND shop_is_test = FALSE    --测试店铺
+    AND shop_name NOT LIKE "%测试%"
+    AND shop_name NOT LIKE "%补差%"
+    AND shop_id IS NOT NULL
+    AND  is_test=FALSE 
+    AND  is_del=FALSE 
+    AND  is_canceled=FALSE
+    AND shop_audit_status='已认证'
+    AND	shop_is_virtual_shop=false 
+    and shop_id not in (select distinct shop_id
+                        from hungry_panda_usa.dwi_hp_shop
+                        where shop_type='团购')
+    --AND shop_bd_name not in ('张宇','ZhangKeli','黄梁劲')
+GROUP BY shop_city_name, shop_bd_name, shop_id, shop_name 
+ORDER BY shop_city_name, shop_bd_name, 过去四周订单量 DESC
+) t1
+
+left JOIN 
+
+(
+SELECT shop_id, SUM(enter_usernum) 过去四周进店人数
+FROM hungry_panda_usa.dws_hp_shop_daily_behavior_di
+WHERE (DATEDIFF(DATE(NOW())-1, DATE(dt)) < 29 AND DATEDIFF(DATE(NOW())-1, DATE(dt)) >= 1)
+GROUP BY shop_id
+) t2
+on t1.商户ID = t2.shop_id
+
+left JOIN 
+
+(
+SELECT shop_id, SUM(enter_usernum) 过去_1_7天
+FROM hungry_panda_usa.dws_hp_shop_daily_behavior_di
+WHERE (DATEDIFF(DATE(NOW())-1, DATE(dt)) < 8 AND DATEDIFF(DATE(NOW())-1, DATE(dt)) >= 1)
+GROUP BY shop_id
+) t3
+on t1.商户ID= t3.shop_id
+
+left JOIN 
+
+(
+SELECT shop_id, SUM(enter_usernum) 过去_8_14天
+FROM hungry_panda_usa.dws_hp_shop_daily_behavior_di
+WHERE (DATEDIFF(DATE(NOW())-1, DATE(dt)) < 15 AND DATEDIFF(DATE(NOW())-1, DATE(dt)) >= 8)
+GROUP BY shop_id
+) t4
+on t1.商户ID = t4.shop_id
+
+left JOIN 
+
+(
+SELECT shop_id, SUM(enter_usernum) 过去_15_21天
+FROM hungry_panda_usa.dws_hp_shop_daily_behavior_di
+WHERE (DATEDIFF(DATE(NOW())-1, DATE(dt)) < 22 AND DATEDIFF(DATE(NOW())-1, DATE(dt)) >= 15)
+GROUP BY shop_id
+) t5
+on t1.商户ID = t5.shop_id
+
+left JOIN 
+
+(
+SELECT shop_id, SUM(enter_usernum) 过去_22_28天
+FROM hungry_panda_usa.dws_hp_shop_daily_behavior_di
+WHERE (DATEDIFF(DATE(NOW())-1, DATE(dt)) < 29 AND DATEDIFF(DATE(NOW())-1, DATE(dt)) >= 22)
+GROUP BY shop_id
+) t6
+on t1.商户ID = t6.shop_id
+;
