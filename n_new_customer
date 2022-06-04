@@ -1,0 +1,79 @@
+--shop
+SELECT  shop_id, count(distinct order_sn) first_ordernum
+from (
+    select shop_id
+           ,user_id
+           ,order_sn
+           ,substr(from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone),1,7) pay_month
+           ,row_number() over(partition by user_id order by pay_timemillis) rk  
+    from   hungry_panda_usa.dwi_hp_order
+    where pay_timemillis>0
+    AND   is_test=FALSE 
+    and   is_del=FALSE 
+    and   is_canceled=FALSE 
+) temp
+where shop_id in (10026,12600,11949,8975,13288,14209)
+and pay_month='2022-05'
+and rk=1
+GROUP BY shop_id
+;
+
+
+--coupon
+select red_packet_id, count(distinct user_id)
+FROM 
+(
+
+SELECT t2.red_packet_id, t1.user_id, t1.支付时间, t2.领取时间, t2.使用时间, datediff(t1.支付时间,t2.领取时间) 时间差
+FROM 
+(SELECT user_id, order_id, SUBSTR(TO_CHAR(FROM_UTC_TIMESTAMP(pay_timemillis-8*60*60*1000, shop_time_zone), 'yyyy-mm-dd'), 1, 7) 支付月,
+    SUBSTR(TO_CHAR(FROM_UTC_TIMESTAMP(pay_timemillis-8*60*60*1000, shop_time_zone), 'yyyy-mm-dd'), 1, 10) 支付时间,
+    row_number() OVER (PARTITION BY user_id ORDER BY pay_timemillis ASC) rnk
+FROM hungry_panda_usa.dwi_hp_order 
+WHERE user_id IN (SELECT user_id
+        FROM hungry_panda_usa.dwd_hp_redpacket
+        WHERE receive_timemillis>0 AND red_packet_id IN 
+        (SELECT red_packet_id
+         FROM hungry_panda_usa.ods_hp_red_packet 
+         WHERE red_packet_id IN (164787,164324,178811,180217,180214)
+         AND crowd='2'))
+    AND pay_timemillis>0
+    AND is_test = false    
+    AND is_del = false    
+    AND is_canceled = false
+ORDER BY user_id) t1
+
+JOIN 
+
+(SELECT user_id, red_packet_id, SUBSTR(TO_CHAR(FROM_UTC_TIMESTAMP(receive_timemillis-8*60*60*1000, time_zone), 'yyyy-mm-dd'), 1, 10) 领取时间,
+    SUBSTR(TO_CHAR(FROM_UTC_TIMESTAMP(used_timemillis-8*60*60*1000, time_zone), 'yyyy-mm-dd'), 1, 10) 使用时间
+        FROM hungry_panda_usa.dwd_hp_redpacket
+        WHERE receive_timemillis>0 AND red_packet_id IN 
+        (SELECT red_packet_id
+         FROM hungry_panda_usa.ods_hp_red_packet 
+         WHERE red_packet_id IN (164787,164324,178811,180217,180214)
+         AND crowd='2')) t2
+ON t1.user_id=t2.user_id
+WHERE t1.rnk=1 AND t1.支付月='2022-05'
+and t1.user_id not in (SELECT user_id
+                        from (
+                            select shop_id
+                                ,user_id
+                                ,order_sn
+                                ,substr(from_utc_timestamp(pay_timemillis-8*3600*1000,shop_time_zone),1,7) pay_month
+                                ,row_number() over(partition by user_id order by pay_timemillis) rk  
+                            from   hungry_panda_usa.dwi_hp_order
+                            where pay_timemillis>0
+                            AND   is_test=FALSE 
+                            and   is_del=FALSE 
+                            and   is_canceled=FALSE 
+                        ) temp
+                        where shop_id in (10026,12600,11949,8975,13288,14209)
+                        and pay_month='2022-05'
+                        and rk=1
+                        )
+
+)
+where 时间差<=30
+GROUP BY red_packet_id
+;
