@@ -1,0 +1,118 @@
+--service fee
+
+select x.城市, x.商家ID, x.商家名称, x.外卖平台服务费类型, x.外卖平台服务费或比率, x.外卖平台服务费下限, x.外卖平台服务费上限, x.外卖有效单量,
+       y.自取平台服务费类型, y.自取平台服务费或比率, y.自取平台服务费下限, y.自取平台服务费上限, y.自取有效单量
+from 
+
+(
+----delivery
+select a.城市, a.商家ID, a.商家名称, a.外卖平台服务费类型, a.外卖平台服务费或比率, a.外卖平台服务费下限, a.外卖平台服务费上限,
+       b.外卖有效单量
+from 
+(
+select t1.city_name 城市, t1.shop_id 商家ID, t1.shop_name 商家名称,
+    case when t2.platform_fee_type=0 then '按金额' when t2.platform_fee_type=1 then '按比率' end 外卖平台服务费类型,
+    case when t2.platform_fee_type=0 then t2.platform_fee/100 when t2.platform_fee_type=1 then t2.platform_fee_rate end 外卖平台服务费或比率,
+    case when t2.platform_fee_type=0 then '按比率时有效' when t2.platform_fee_type=1 then t3.platform_fee_low_limit/100 end 外卖平台服务费下限,
+    case when t2.platform_fee_type=0 then '按比率时有效' when t2.platform_fee_type=1 then t3.platform_fee_up_limit/100 end 外卖平台服务费上限
+FROM hungry_panda_usa.dwi_hp_shop t1 join hungry_panda_usa.ods_hp_shop t2 on t1.shop_id=t2.shop_id join hungry_panda_usa.ods_hp_shop_extra_info t3 on t1.shop_id=t3.shop_id
+where t1.is_del=FALSE 
+    and t1.audit_status='已认证'
+    and t1.is_test=FALSE 
+    and t1.shop_type <> '团购'
+    and t1.is_virtual_shop=FALSE 
+order by t1.city_name
+) a
+
+left join
+
+(
+select shop_id, count(distinct order_sn) 外卖有效单量
+from hungry_panda_usa.dwi_hp_order 
+where is_test=FALSE 
+    AND is_del=FALSE 
+    AND is_canceled=FALSE
+    and date(pay_time) between '2022-05-01' and '2022-05-31'
+    and delivery_type <> '自取'
+group by shop_id
+) b 
+
+on a.商家ID=b.shop_id
+) x
+
+JOIN
+
+(
+----pickup
+select a.城市, a.商家ID, a.商家名称, --a.是否用户自取, 
+       a.自取平台服务费类型, a.自取平台服务费或比率, a.自取平台服务费下限, a.自取平台服务费上限,
+       b.自取有效单量
+from 
+(
+select t1.city_name 城市, t1.shop_id 商家ID, t1.shop_name 商家名称, t1.is_selftake 是否用户自取,
+    case when t2.user_pack_platform_fee_type=0 then '按金额' when t2.user_pack_platform_fee_type=1 then '按比率' end 自取平台服务费类型,
+    case when t2.user_pack_platform_fee_type=0 then t2.user_pack_platform_fee/100 when t2.user_pack_platform_fee_type=1 then t2.user_pack_platform_fee_rate end 自取平台服务费或比率,
+    case when t2.user_pack_platform_fee_type=0 then '按比率时有效' when t2.user_pack_platform_fee_type=1 then t2.user_pack_platform_fee_low_limit/100 end 自取平台服务费下限,
+    case when t2.user_pack_platform_fee_type=0 then '按比率时有效' when t2.user_pack_platform_fee_type=1 then t2.user_pack_platform_fee_up_limit/100 end 自取平台服务费上限
+FROM hungry_panda_usa.dwi_hp_shop t1 join hungry_panda_usa.ods_hp_shop_extra_info t2 on t1.shop_id=t2.shop_id
+where t1.is_del=FALSE 
+    and t1.audit_status='已认证'
+    and t1.is_test=FALSE 
+    and t1.shop_type <> '团购'
+    --and t1.is_selftake=TRUE 
+    and t1.is_virtual_shop=FALSE 
+order by t1.city_name
+) a
+
+left join
+
+(
+select shop_id, count(distinct order_sn) 自取有效单量
+from hungry_panda_usa.dwi_hp_order 
+where is_test=FALSE 
+    AND is_del=FALSE 
+    AND is_canceled=FALSE
+    and date(pay_time) between '2022-05-01' and '2022-05-31'
+    and delivery_type = '自取'
+group by shop_id
+) b 
+
+on a.商家ID=b.shop_id
+) y 
+
+ON x.商家ID=y.商家ID
+;
+
+
+
+--commission
+
+with a as ( ----shop info
+select city_name, shop_id, shop_name, bd_name
+from hungry_panda_usa.dwi_hp_shop 
+where is_del=FALSE 
+    and audit_status='已认证'
+    and is_test=FALSE 
+    and shop_type <> '团购'
+    and is_virtual_shop=FALSE 
+),
+
+b as ( ----commission rate
+    select shop_id, 
+
+           case when effect_start_time>0 then substr(from_utc_timestamp(effect_start_time-8*3600*1000,'America/New_York'),1,10) else '无' end 佣金率生效时间,
+           case when effect_end_time>0 then substr(from_utc_timestamp(effect_end_time-8*3600*1000,'America/New_York'),1,10) else '无' end 佣金率到期时间,
+           case when commission_type=1 then '熊猫配送佣金率' when commission_type=2 then '商家配送佣金率' when commission_type=3 then '用户自取佣金率' end 佣金率类型,
+           commission_rate_before 修改前佣金率, commission_rate_during 期间佣金率, commission_rate_after 到期后佣金率 
+
+    FROM hungry_panda_usa.ods_hp_commission_config_df
+    where is_del=0
+        and dt='2022-05-30'
+)
+
+
+select a.city_name 城市, a.shop_id 商家id, a.shop_name 商家名称, a.bd_name 商家bd,
+       b.佣金率生效时间, b.佣金率到期时间, 
+       b.佣金率类型, b.修改前佣金率, b.期间佣金率, b.到期后佣金率 
+from a join b on a.shop_id=b.shop_id 
+;
